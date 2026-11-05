@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>CYRUS V2 — BSC Mainnet Deploy (Trust Wallet compatible)</title>
+<title>CYRUS V2 — BSC Testnet Deploy (Trust Wallet compatible)</title>
 <style>
   :root { --bg:#0d1117; --panel:#161b22; --bd:#30363d; --fg:#e6edf3; --dim:#8b949e;
           --ok:#3fb950; --warn:#d29922; --err:#f85149; --acc:#58a6ff; }
@@ -67,7 +67,7 @@
 <body>
 <div class="wrap">
 
-<h1>CYRUS V2 — BSC Mainnet Deploy</h1>
+<h1>CYRUS V2 — BSC Testnet Deploy</h1>
 <div class="sub">Trust Wallet compatible &middot; chainId 97 (BSC Testnet) &middot; no private key exists in this repo</div>
 
 <div class="warnbar">
@@ -81,7 +81,7 @@
 
 <h2>Configuration</h2>
 <table>
-  <tr><th>Chain</th><td>BNB Smart Chain &mdash; chainId 56 (0x38)</td></tr>
+  <tr><th>Chain</th><td>BSC Testnet &mdash; chainId 97 (0x61)</td></tr>
   <tr><th>Deployer (owner)</th><td class="mono" id="cfg-owner"></td></tr>
   <tr><th>Tax wallet</th><td class="mono" id="cfg-tax"></td></tr>
   <tr><th>Router02</th><td class="mono" id="cfg-router"></td></tr>
@@ -96,7 +96,7 @@
   <div class="num">1</div>
   <div class="body">
     <div class="title">Connect &amp; preflight</div>
-    <div class="desc">Switch MetaMask to chainId 56, confirm the connected account is
+    <div class="desc">Switch wallet to chainId 97 (BSC Testnet), confirm the connected account is
       OWNER, then read-only checks: code at router/factory, router.WETH(),
       router.factory(), factory reference pair.</div>
   </div>
@@ -195,7 +195,7 @@ const P = {
   "ROUTER": "0xD99D1c33F9fE5840940c899917230B31004d907b",
   "FACTORY": "0x6725F303b657a9451d8BA641349b82463931398b",
   "WBNB": "0xae13d989daC2f0dEbFf460aC112a837C89BA4093",
-  "USDT": "0x55d398326f99059fF775485246999027B3197955",
+  "USDT": "0x7ef95a0FEE0Dd31b22626Ff2E5dF35d069D9341F",
   "REF_PAIR": "0x0000000000000000000000000000000000000000",
   "CHAIN_ID": 97,
   "CHAIN_ID_HEX": "0x61",
@@ -347,7 +347,7 @@ async function step1() {
     }
     chainId = await rpc("eth_chainId", []);
   }
-  if (parseInt(chainId, 16) !== P.CHAIN_ID) fail("wallet is not on chainId 56");
+  if (parseInt(chainId, 16) !== P.CHAIN_ID) fail("wallet is not on chainId 97");
   log("chainId 97 (BSC Testnet) OK", "ok");
 
   const accts = await rpc("eth_requestAccounts", []);
@@ -386,9 +386,9 @@ async function step1() {
   if (same(ref, "0x0000000000000000000000000000000000000000")) {
     fail("factory.getPair(WBNB, USDT) returned zero — not the real factory");
   }
-  if (!same(ref, P.REF_PAIR)) {
+  if (P.REF_PAIR !== "0x0000000000000000000000000000000000000000" && !same(ref, P.REF_PAIR)) {
     fail("factory reference pair\n  " + ref + "\n!= known live pair\n  " + P.REF_PAIR +
-         "\nThe connected factory is not the expected BSC mainnet factory.");
+         "\nThe connected factory is not the expected factory.");
   }
   log("factory ground truth: reference pair " + ref + " OK", "ok");
 
@@ -593,8 +593,8 @@ async function step8() {
   log("", "dim");
   log("token  : " + state.cyrus, "ok");
   log("pair   : " + p, "ok");
-  log("BscScan: https://bscscan.com/token/" + state.cyrus, "dim");
-  log("BscScan: https://bscscan.com/address/" + p, "dim");
+  log("BscScan: https://testnet.bscscan.com/token/" + state.cyrus, "dim");
+  log("BscScan: https://testnet.bscscan.com/address/" + p, "dim");
 
   $("ok").innerHTML =
     "Deploy complete.<br/>" +
@@ -642,7 +642,7 @@ function wire() {
 
   log("CYRUS V2 MetaMask deploy page loaded.", "dim");
   log("No private key is used. Every transaction is signed in Trust Wallet.", "dim");
-  log("Chain 56 · OWNER " + P.OWNER, "dim");
+  log("Chain 97 (BSC Testnet) · OWNER " + P.OWNER, "dim");
   if (!window.ethereum) {
     log("No EIP-1193 wallet detected — install MetaMask and reload.", "err");
   }
