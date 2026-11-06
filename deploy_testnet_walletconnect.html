@@ -283,6 +283,12 @@ function fail(msg) {
 }
 
 function clearErr() { $("err").classList.add("hidden"); $("err").textContent = ""; }
+function toChainId(v) {
+  if (typeof v === "number") return v;
+  const s = String(v).trim();
+  if (/^0x/i.test(s)) return parseInt(s, 16);
+  return parseInt(s, 10);
+}
 
 let wcProvider = null;
 
@@ -383,7 +389,7 @@ async function step1() {
   if (!wcProvider) fail("WalletConnect did not initialise");
 
   let chainId = await rpc("eth_chainId", []);
-  if (parseInt(chainId, 16) !== P.CHAIN_ID) {
+  if (toChainId(chainId) !== P.CHAIN_ID) {
     log("wrong chain " + chainId + " — requesting switch to " + P.CHAIN_ID_HEX, "warn");
     try {
       await rpc("wallet_switchEthereumChain", [{ chainId: P.CHAIN_ID_HEX }]);
@@ -399,7 +405,7 @@ async function step1() {
     }
     chainId = await rpc("eth_chainId", []);
   }
-  if (parseInt(chainId, 16) !== P.CHAIN_ID) fail("wallet is not on chainId 97");
+  if (toChainId(chainId) !== P.CHAIN_ID) fail("wallet is not on chainId 97");
   log("chainId 97 (BSC Testnet) OK", "ok");
 
   const accts = await rpc("eth_requestAccounts", []);
