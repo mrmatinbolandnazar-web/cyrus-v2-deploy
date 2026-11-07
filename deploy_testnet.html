@@ -212,6 +212,7 @@ const P = {
     "balanceOf": "0x70a08231",
     "setPair": "0x8187f516",
     "approve": "0x095ea7b3",
+    "seedLiquidity": "0xc57fed13",
     "getPair": "0xe6a43905",
     "createPair": "0xc9c65396",
     "INIT_CODE_PAIR_HASH": "0x5855a25a",
@@ -638,7 +639,27 @@ async function step7() {
   log("LP supply is zero — OK", "ok");
 
   const data = P.SEL.seedLiquidity + wnum(amtC);
-  const r = await sendTx({ to: state.cyrus, data: data, gas: P.GAS.seedLiquidity, value: toHex(amtB) });
+  if (!/^0x[0-9a-fA-F]{72}$/.test(data)) fail("invalid calldata: must be 0x-prefixed hex of exactly 74 characters");
+
+  // Read-only simulation + gas estimate on chain 97.
+  try {
+    await rpc("eth_call", [{ from: P.OWNER, to: state.cyrus, data: data, value: toHex(amtB) }, "latest"]);
+  } catch (e) {
+    fail("seedLiquidity simulation failed: " + (e && e.message ? e.message : e));
+  }
+  let estHex;
+  try {
+    estHex = await rpc("eth_estimateGas", [{ from: P.OWNER, to: state.cyrus, data: data, value: toHex(amtB) }]);
+  } catch (e) {
+    fail("seedLiquidity gas estimate failed: " + (e && e.message ? e.message : e));
+  }
+  let gasLimit = BigInt(estHex);
+  log("seedLiquidity estimated gas: " + gasLimit.toString(), "dim");
+  if (gasLimit > 800000n) {
+    gasLimit = gasLimit * 120n / 100n;
+    log("estimate exceeded 800000 — adjusted gas limit: " + gasLimit.toString(), "warn");
+  }
+  const r = await sendTx({ to: state.cyrus, data: data, gas: toHex(gasLimit), value: toHex(amtB) });
   log("seedLiquidity confirmed — tx " + r.transactionHash, "ok");
   state.lp = r;
   setBadge(7, "done", "done");
