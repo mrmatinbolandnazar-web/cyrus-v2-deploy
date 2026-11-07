@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>CYRUS V2 — Testnet Buy (MetaMask)</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background:#0d1117; color:#e6edf3; padding:20px; max-width:860px; margin:0 auto; }
+  .note { background:#161b22; border:1px solid #30363d; border-radius:8px; padding:16px; margin-bottom:16px; }
+  .btn { display:inline-block; padding:12px 24px; background:#f6851b; color:#fff; border:none; border-radius:8px; font-size:16px; cursor:pointer; margin:8px 4px; }
+  .btn:disabled { opacity:.5; cursor:not-allowed; }
+  .mono { font-family: monospace; word-break: break-all; }
+  .ok { color:#3fb950; } .warn { color:#d29922; } .err { color:#f85149; }
+  .log { background:#0d1117; border:1px solid #30363d; border-radius:8px; padding:12px; font-family:monospace; font-size:12px; max-height:260px; overflow-y:auto; white-space:pre-wrap; }
+</style>
+</head>
+<body>
+<h1>CYRUS V2 — Testnet Buy</h1>
+<div class="note">
+  Buyer wallet: MetaMask (EIP-1193) &middot; chainId 97 (BSC Testnet)<br/>
+  Router: <span class="mono">0x9Ac64Cc6e4415144C455BD8E4837Fea55603e5c3</span><br/>
+  CYRUS: <span class="mono">0x154e889f0cdf0814e1dfff527c32a8bdd526285f</span><br/>
+  Fixed buy: 0.001 tBNB &middot; max slippage 3% &middot; 10 min deadline &middot; 1% buy tax expected.
+</div>
+
+<div id="status" class="note">Detecting wallet...</div>
+<div id="info" class="note" style="display:none;">
+  <p>Account: <span class="mono" id="acct"></span></p>
+  <p>Quote CYRUS out: <span class="mono" id="quote"></span></p>
+  <p>Min out (3% slippage): <span class="mono" id="minout"></span></p>
+  <p>Expected buy tax: <span class="mono" id="tax"></span> CYRUS (1%)</p>
+  <p>Estimated gas: <span class="mono" id="gas"></span></p>
+  <p id="sim" class="warn">Simulation not run yet.</p>
+</div>
+
+<button class="btn" id="quoteBtn" disabled>Quote &amp; simulate</button>
+<button class="btn" id="buyBtn" disabled>Buy</button>
+
+<h2>Log</h2>
+<div class="log" id="log"></div>
+
+<script>
+"use strict";
+const CHAIN_ID = 97;
+const OWNER = "0xC44FD331C871F8CE6fa45e0bc9264E034769D408";
+const CHAIN_HEX = "0x61";
+const ROUTER = "0x9Ac64Cc6e4415144C455BD8E4837Fea55603e5c3";
+const WBNB = "0xae13d989daC2f0dEbFf460aC112a837C89BAa7cd";
+const CYRUS = "0x154e889f0cdf0814e1dfff527c32a8bdd526285f";
+const BUY_WEI = 1000000000000000n; // 0.001 BNB
+const SLIPPAGE_BPS = 300n; // 3%
+const DEADLINE_SEC = 600;
+
+const $ = (id) => document.getElementById(id);
+function log(line, cls){ const el=$("log"); const d=document.createElement("div"); d.className="ln "+(cls||""); d.textContent=line; el.appendChild(d); el.scrollTop=el.scrollHeight; }
+function toHex(n){ return "0x"+BigInt(n).toString(16); }
+function pad32(x){ return BigInt(x).toString(16).padStart(64,"0"); }
+function encAddr(a){ return a.toLowerCase().replace(/^0x/,"").padStart(64,"0"); }
+
+function getProvider(){
+  if (window.ethereum) return window.ethereum;
+  return null;
+}
+
+async function rpc(method, params){
+  const p=getProvider();
+  if(!p) throw new Error("No EIP-1193 wallet");
+  return await p.request({method, params: params||[]});
+}
+
+function encodeGetAmountsOut(amountIn, path){
+  let data="0xd06ca61f"+pad32(amountIn);
+  const off="0000000000000000000000000000000000000000000000000000000000000040";
+  const len=pad32(path.length);
+  const addrs=path.map(encAddr).join("");
+  return data+off+len+addrs;
+}
+
+function encodeSwapSupporting(amountOutMin, path, to, deadline, value){
+  // 0x7ff36ab5
+  let data="0xb6f9de95"+pad32(amountOutMin);
+  const off="0000000000000000000000000000000000000000000000000000000000000080";
+  data += encAddr(to);
+  data += pad32(deadline);
+  data += pad32(path.length);
+  data += path.map(encAddr).join("");
+  return data;
+}
+
+async function ensureChain(){
+  let cid=await rpc("eth_chainId",[]);
+  if(parseInt(cid,16)!==CHAIN_ID){
+    try { await rpc("wallet_switchEthereumChain",[{chainId:CHAIN_HEX}]); }
+    catch(e){ throw new Error("chain switch failed: "+(e&&e.message?e.message:e)); }
+    cid=await rpc("eth_chainId",[]);
+  }
+  if(parseInt(cid,16)!==CHAIN_ID) throw new Error("not on chain 97");
+}
+
+async function quoteAndSimulate(){
+  $("sim").textContent="Running...";
+  $("sim").className="warn";
+  await ensureChain();
+  const accts=await rpc("eth_requestAccounts",[]);
+  if(!accts||!accts.length) throw new Error("no account");
+  const buyer=accts[0];
+  if (buyer.toLowerCase() === OWNER.toLowerCase()) throw new Error("buyer must not be OWNER");
+  $("acct").textContent=buyer;
+
+  const data=encodeGetAmountsOut(BUY_WEI,[WBNB,CYRUS]);
+  const res=await rpc("eth_call",[{to:ROUTER,data:data},"latest"]);
+  // parse amounts array
+  const h=res.slice(2);
+  const off=parseInt(h.slice(0,64),16)*2;
+  const ln=parseInt(h.slice(off,off+64),16);
+  const amtOut=BigInt("0x"+h.slice(off+64+64, off+64+128)); // second amount
+  // Actually amounts[1] is at off + 32 + 32
+  const amtOut2=BigInt("0x"+h.slice(off + 64 + 64, off + 64 + 128));
+  $("quote").textContent=(Number(amtOut2)/1e18).toFixed(6)+" CYRUS";
+
+  const minOut=amtOut2*9600n/10000n;
+  $("minout").textContent=(Number(minOut)/1e18).toFixed(6)+" CYRUS";
+
+  // expected 1% buy tax: compare to no-tax theoretical? Use quote *? We'll show 1% of quote as expected tax.
+  const tax=amtOut2/100n;
+  $("tax").textContent=(Number(tax)/1e18).toFixed(6);
+
+  const deadline=Math.floor(Date.now()/1000)+DEADLINE_SEC;
+  const swapData=encodeSwapSupporting(minOut,[WBNB,CYRUS],buyer,deadline,BUY_WEI);
+
+  // simulate
+  try {
+    await rpc("eth_call",[{from:buyer,to:ROUTER,data:swapData,value:toHex(BUY_WEI)},"latest"]);
+  } catch(e){
+    $("sim").textContent="Simulation FAILED: "+(e&&e.message?e.message:e);
+    $("sim").className="err";
+    $("buyBtn").disabled=true;
+    throw e;
+  }
+  // estimate gas
+  let est;
+  try { est=await rpc("eth_estimateGas",[{from:buyer,to:ROUTER,data:swapData,value:toHex(BUY_WEI)}]); }
+  catch(e){ throw new Error("gas estimate failed: "+(e&&e.message?e.message:e)); }
+  const gas=(BigInt(est)*120n+99n)/100n;
+  $("gas").textContent=gas.toString();
+  $("sim").textContent="Simulation OK. Buy enabled.";
+  $("sim").className="ok";
+  window._buy={buyer,swapData,minOut,deadline,gas};
+  $("buyBtn").disabled=false;
+}
+
+async function buy(){
+  $("buyBtn").disabled=true;
+  try {
+    await quoteAndSimulate();
+  } catch(e){
+    log("Buy aborted: simulation failed: "+(e&&e.message?e.message:e),"err");
+    return;
+  }
+  if(!window._buy) return;
+  if (window._buy.deadline <= Math.floor(Date.now()/1000)) { log("Buy aborted: deadline expired","err"); return; }
+  const {buyer,swapData,gas}=window._buy;
+  try {
+    const txHash=await rpc("eth_sendTransaction",[{from:buyer,to:ROUTER,data:swapData,value:toHex(BUY_WEI),gas:toHex(gas)}]);
+    log("Buy tx: "+txHash,"ok");
+  } catch(e){
+    $("buyBtn").disabled=false;
+    log("Buy failed: "+(e&&e.message?e.message:e),"err");
+  }
+}
+
+async function init(){
+  const p=getProvider();
+  if(!p){ $("status").textContent="No MetaMask/EIP-1193 wallet detected."; return; }
+  try { await ensureChain(); const accts=await rpc("eth_accounts",[]); $("status").innerHTML="<span class='ok'>Wallet ready</span>"; $("info").style.display="block"; $("quoteBtn").disabled=false; if(accts&&accts.length) $("acct").textContent=accts[0]; }
+  catch(e){ $("status").innerHTML="<span class='err'>"+(e&&e.message?e.message:e)+"</span>"; }
+}
+$("quoteBtn").addEventListener("click", async ()=>{ try { await quoteAndSimulate(); } catch(e){ log("Quote/sim failed: "+(e&&e.message?e.message:e),"err"); } });
+$("buyBtn").addEventListener("click", async ()=>{ try { await buy(); } catch(e){ log("Buy failed: "+(e&&e.message?e.message:e),"err"); } });
+init();
+</script>
+</body>
+</html>
+EOF
+echo done
