@@ -112,6 +112,7 @@
   </div>
   <div class="badge" id="b2">pending</div>
   <button id="go2" disabled>Deploy</button>
+  <button id="goResume2" class="ghost" disabled>Resume existing deployment</button>
 </div>
 
 <div class="step blocked" id="s3">
@@ -425,8 +426,42 @@ async function step1() {
   log("PREFLIGHT PASSED", "ok");
 
   setBadge(1, "done", "done");
+  $("goResume2").disabled = false;
   unlock(2);
   log("step 1 complete — step 2 unlocked", "ok");
+}
+
+/* ---------- resume existing deployment (no transaction) ----------------- */
+const RESUME_TX = "0xdbdecf2685a88e4a0ecf76f37cc2f35858db83fbadfde9dabd45f5de88532e0f";
+const RESUME_CONTRACT = "0x7359fd900497d86664cee03bb73f8fbce84d7c8a";
+
+async function resumeExisting() {
+  clearErr();
+  setBadge(2, "run", "running");
+  let chainId = await rpc("eth_chainId", []);
+  if (parseInt(chainId, 16) !== P.CHAIN_ID) fail("wallet is not on chainId 97");
+  log("chainId 97 (BSC Testnet) OK", "ok");
+
+  let receipt = null;
+  try { receipt = await rpc("eth_getTransactionReceipt", [RESUME_TX]); } catch (e) {}
+  if (!receipt) fail("no receipt found for resume tx " + RESUME_TX);
+  if (receipt.status !== "0x1") fail("resume tx did not succeed: " + RESUME_TX);
+  log("resume tx receipt status 0x1 OK", "ok");
+
+  const addr = receipt.contractAddress;
+  if (!addr || !same(addr, RESUME_CONTRACT)) {
+    fail("receipt contractAddress " + addr + " != " + RESUME_CONTRACT);
+  }
+  log("receipt contractAddress matches " + RESUME_CONTRACT + " OK", "ok");
+
+  const code = await codeAt(RESUME_CONTRACT);
+  if (!code || code === "0x") fail("no code at resumed contract " + RESUME_CONTRACT);
+  log("code at resumed contract OK (" + ((code.length - 2) / 2) + " bytes)", "ok");
+
+  state.cyrus = RESUME_CONTRACT;
+  setBadge(2, "done", "done (resumed)");
+  unlock(3);
+  log("Resumed existing deployment — step 3 unlocked (no transaction sent)", "ok");
 }
 
 /* ---------- step 2: deploy --------------------------------------------- */
@@ -653,6 +688,17 @@ function wire() {
   $("inCyrus").addEventListener("input", refreshTaxNote);
   $("inBnb").addEventListener("input", refreshTaxNote);
 
+  $("goResume2").addEventListener("click", async function () {
+    try { await resumeExisting(); }
+    catch (e) {
+      setBadge(2, "err", "failed");
+      if ($("err").classList.contains("hidden")) {
+        $("err").textContent = "BLOCKED: " + (e && e.message ? e.message : String(e));
+        $("err").classList.remove("hidden");
+      }
+      log("resume failed: " + (e && e.message ? e.message : e), "err");
+    }
+  });
   const steps = { 1: step1, 2: step2, 3: step3, 4: step4, 5: step5, 6: step6, 7: step7, 8: step8 };
   for (const n of Object.keys(steps)) {
     $("go" + n).addEventListener("click", async function () {
