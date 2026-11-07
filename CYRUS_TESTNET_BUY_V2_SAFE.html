@@ -80,6 +80,7 @@ function encodeSwapSupporting(amountOutMin, path, to, deadline, value){
   // 0x7ff36ab5
   let data="0xb6f9de95"+pad32(amountOutMin);
   const off="0000000000000000000000000000000000000000000000000000000000000080";
+  data += off;
   data += encAddr(to);
   data += pad32(deadline);
   data += pad32(path.length);
@@ -142,6 +143,13 @@ async function quoteAndSimulate(){
   try { est=await rpc("eth_estimateGas",[{from:buyer,to:ROUTER,data:swapData,value:toHex(BUY_WEI)}]); }
   catch(e){ throw new Error("gas estimate failed: "+(e&&e.message?e.message:e)); }
   const gas=(BigInt(est)*120n+99n)/100n;
+  const bal=BigInt(await rpc("eth_getBalance",[buyer,"latest"]));
+  if (bal < BUY_WEI + gas) {
+    $("sim").textContent="Insufficient balance for buy + gas";
+    $("sim").className="err";
+    $("buyBtn").disabled=true;
+    throw new Error("insufficient balance");
+  }
   $("gas").textContent=gas.toString();
   $("sim").textContent="Simulation OK. Buy enabled.";
   $("sim").className="ok";
@@ -162,7 +170,16 @@ async function buy(){
   const {buyer,swapData,gas}=window._buy;
   try {
     const txHash=await rpc("eth_sendTransaction",[{from:buyer,to:ROUTER,data:swapData,value:toHex(BUY_WEI),gas:toHex(gas)}]);
-    log("Buy tx: "+txHash,"ok");
+    log("Buy tx submitted: "+txHash,"ok");
+    let receipt=null;
+    for(let i=0;i<60;i++){
+      try { receipt=await rpc("eth_getTransactionReceipt",[txHash]); } catch(e){}
+      if(receipt) break;
+      await new Promise(r=>setTimeout(r,2000));
+    }
+    if(!receipt) throw new Error("timed out waiting for receipt");
+    if(receipt.status!=="0x1") throw new Error("transaction reverted: "+txHash);
+    log("Buy confirmed in block "+BigInt(receipt.blockNumber).toString(),"ok");
   } catch(e){
     $("buyBtn").disabled=false;
     log("Buy failed: "+(e&&e.message?e.message:e),"err");
@@ -174,6 +191,11 @@ async function init(){
   if(!p){ $("status").textContent="No MetaMask/EIP-1193 wallet detected."; return; }
   try { await ensureChain(); const accts=await rpc("eth_accounts",[]); $("status").innerHTML="<span class='ok'>Wallet ready</span>"; $("info").style.display="block"; $("quoteBtn").disabled=false; if(accts&&accts.length) $("acct").textContent=accts[0]; }
   catch(e){ $("status").innerHTML="<span class='err'>"+(e&&e.message?e.message:e)+"</span>"; }
+  const provider=getProvider();
+  if(provider && provider.on){
+    provider.on("accountsChanged", ()=>{ window._buy=null; $("buyBtn").disabled=true; $("sim").textContent="Account changed - re-quote required"; $("sim").className="warn"; log("accountsChanged - re-quote required","warn"); });
+    provider.on("chainChanged", ()=>{ window._buy=null; $("buyBtn").disabled=true; $("sim").textContent="Chain changed - re-quote required"; $("sim").className="warn"; log("chainChanged - re-quote required","warn"); });
+  }
 }
 $("quoteBtn").addEventListener("click", async ()=>{ try { await quoteAndSimulate(); } catch(e){ log("Quote/sim failed: "+(e&&e.message?e.message:e),"err"); } });
 $("buyBtn").addEventListener("click", async ()=>{ try { await buy(); } catch(e){ log("Buy failed: "+(e&&e.message?e.message:e),"err"); } });
@@ -181,5 +203,3 @@ init();
 </script>
 </body>
 </html>
-EOF
-echo done
