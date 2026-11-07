@@ -653,12 +653,11 @@ async function step7() {
   } catch (e) {
     fail("seedLiquidity gas estimate failed: " + (e && e.message ? e.message : e));
   }
-  let gasLimit = BigInt(estHex);
-  log("seedLiquidity estimated gas: " + gasLimit.toString(), "dim");
-  if (gasLimit > 800000n) {
-    gasLimit = gasLimit * 120n / 100n;
-    log("estimate exceeded 800000 — adjusted gas limit: " + gasLimit.toString(), "warn");
-  }
+  const estimated = BigInt(estHex);
+  const adjusted = (estimated * 120n + 99n) / 100n;
+  let gasLimit = adjusted > 800000n ? adjusted : 800000n;
+  log("seedLiquidity estimated gas: " + estimated.toString(), "dim");
+  log("seedLiquidity gas limit: " + gasLimit.toString(), "dim");
   const r = await sendTx({ to: state.cyrus, data: data, gas: toHex(gasLimit), value: toHex(amtB) });
   log("seedLiquidity confirmed — tx " + r.transactionHash, "ok");
   state.lp = r;
