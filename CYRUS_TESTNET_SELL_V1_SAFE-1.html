@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>CYRUS V2 — BSC Testnet Sell Check</title>
+<style>
+:root{color-scheme:dark} body{margin:0 auto;padding:20px;max-width:790px;background:#0d1117;color:#e6edf3;font-family:system-ui,-apple-system,Arial,sans-serif;line-height:1.5}
+h1{font-size:1.5rem} .panel{padding:15px;margin:12px 0;background:#161b22;border:1px solid #30363d;border-radius:10px}
+button{padding:13px 16px;margin:5px 5px 5px 0;border:0;border-radius:8px;background:#e78b22;color:#fff;font-weight:700;cursor:pointer;font-size:15px}
+button:disabled{opacity:.42;cursor:not-allowed} .mono{font-family:ui-monospace,monospace;overflow-wrap:anywhere}
+.good{color:#3fb950} .bad{color:#ff7b72} .dim{color:#9da7b4} .warn{color:#e3b341}
+#log{padding:12px;white-space:pre-wrap;font:12px/1.6 ui-monospace,monospace;background:#060a10;border:1px solid #30363d;min-height:80px;overflow-wrap:anywhere}
+small{color:#a9b2bf}
+</style>
+</head>
+<body>
+<h1>CYRUS V2 — Testnet SELL</h1>
+<div class="panel">
+<strong>TESTNET ONLY — chain 97</strong><br/>
+Sell amount: <b>1,000,000,000 CYRUS</b><br/>
+Expected sell tax: <b>2% = 20,000,000 CYRUS</b><br/>
+Maximum market slippage: <b>3%</b> (in addition to the 2% sell tax)<br/>
+Deadline: 10 minutes. Approval is limited to this sell amount.<br/>
+Buyer: <span class="mono" id="fixedBuyer"></span><br/>
+Router: <span class="mono" id="fixedRouter"></span><br/>
+Token: <span class="mono" id="fixedToken"></span>
+</div>
+<div id="status" class="panel warn">Detecting wallet...</div>
+<div class="panel">
+<div>Current account: <span class="mono" id="account">Not connected</span></div>
+<div>CYRUS balance: <span id="tokenBal">—</span></div>
+<div>tBNB balance: <span id="bnbBal">—</span></div>
+<div>Gross quote (tBNB): <span id="quote">—</span></div>
+<div>Minimum tBNB after tax + slippage: <span id="min">—</span></div>
+<div>Router allowance (CYRUS): <span id="allowance">—</span></div>
+<div>Estimated sell gas limit: <span id="gas">—</span></div>
+<div id="sim" class="warn">No simulation yet.</div>
+</div>
+<button id="quoteBtn">1. Connect / Quote &amp; Simulate</button>
+<button id="approveBtn" disabled>2. Approve 1B CYRUS</button>
+<button id="sellBtn" disabled>3. Sell 1B CYRUS</button>
+<div class="panel"><strong>Important:</strong> Approval and Sell each require an explicit MetaMask confirmation. No real BNB or mainnet is used. Do not sign anything if MetaMask shows a different network, spender, token, or amount. Gas is paid in testnet BNB.</div>
+<h2>Log</h2><div id="log"></div>
+<script>
+"use strict";
+const CHAIN_ID=97, CHAIN_HEX="0x61";
+const BUYER="0x845b09aa5a7a4887684c919018c63b3a05e37dce";
+const ROUTER="0x9Ac64Cc6e4415144C455BD8E4837Fea55603e5c3";
+const TOKEN="0x154e889f0cdf0814e1dfff527c32a8bdd526285f";
+const WBNB="0xae13d989daC2f0dEbFf460aC112a837C89BAa7cd";
+const TAX_WALLET="0x58755a11E67D19A6b32C38C9528E7EC14D16D686";
+const SELL_WEI=1000000000n*10n**18n;
+const SELL_TAX_BPS=200n, SLIPPAGE_BPS=300n, DEADLINE_SEC=600;
+const TRANSFER_TOPIC="0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+const $=id=>document.getElementById(id);
+const p32=v=>BigInt(v).toString(16).padStart(64,"0");
+const addr=v=>{if(!/^0x[a-fA-F0-9]{40}$/.test(v))throw Error("Invalid address");return v.slice(2).toLowerCase().padStart(64,"0")};
+const hex=v=>"0x"+BigInt(v).toString(16);
+const norm=v=>v.toLowerCase();
+function fmt(v,dec=18,maxFrac=10){v=BigInt(v);const negative=v<0n;if(negative)v=-v;const base=10n**BigInt(dec);const whole=v/base;let frac=(v%base).toString().padStart(dec,"0").slice(0,maxFrac).replace(/0+$/g,"");return (negative?"-":"")+whole.toLocaleString("en-US")+(frac?"."+frac:"");}
+function log(m,level){const x=document.createElement("div");x.textContent=m;x.className=level||"";$("log").appendChild(x);x.scrollIntoView({block:"nearest"});}
+function provider(){const e=window.ethereum;if(!e)return null;if(e.providers&&Array.isArray(e.providers)){return e.providers.find(p=>p.isMetaMask)||e;}return e;}
+async function rpc(method,params=[]){const p=provider();if(!p)throw Error("No injected MetaMask EIP-1193 provider; use MetaMask in-app browser");return p.request({method,params});}
+function reset(){window.quoteState=null;$("sellBtn").disabled=true;$("approveBtn").disabled=true;$("sim").textContent="Re-quote required";$("sim").className="warn";}
+async function chainAndAccount(){let chain=await rpc("eth_chainId");if(BigInt(chain)!==97n){await rpc("wallet_switchEthereumChain",[{chainId:CHAIN_HEX}]);chain=await rpc("eth_chainId");}if(BigInt(chain)!==97n)throw Error("Wrong network — BSC Testnet chain 97 required");const accounts=await rpc("eth_requestAccounts");if(!accounts?.length)throw Error("No connected account");const who=accounts[0];$("account").textContent=who;if(norm(who)!==norm(BUYER))throw Error("Wrong wallet. Switch to CYRUS TEST BUYER: "+BUYER);return who;}
+async function call(to,data,from){const tx={to,data};if(from)tx.from=from;return rpc("eth_call",[tx,"latest"]);}
+async function tokenBalance(who){return BigInt(await call(TOKEN,"0x70a08231"+addr(who)));}
+async function allowance(who){return BigInt(await call(TOKEN,"0xdd62ed3e"+addr(who)+addr(ROUTER)));}
+async function bnbBalance(who){return BigInt(await rpc("eth_getBalance",[who,"latest"]));}
+function quoteInput(amount,path){return "0xd06ca61f"+p32(amount)+p32(64n)+p32(BigInt(path.length))+path.map(addr).join("");}
+function decodeQuote(data){if(!/^0x[0-9a-fA-F]+$/.test(data)||data.length<194)throw Error("Malformed getAmountsOut response");const d=data.slice(2);const off=Number(BigInt("0x"+d.slice(0,64)))*2;const count=Number(BigInt("0x"+d.slice(off,off+64)));if(count!==2)throw Error("Expected 2 quote amounts");const start=off+64+64;if(d.length<start+64)throw Error("Short quote response");return BigInt("0x"+d.slice(start,start+64));}
+function sellInput(minOut,buyer,deadline){const selector="0x791ac947";return selector+p32(SELL_WEI)+p32(minOut)+p32(160n)+addr(buyer)+p32(deadline)+p32(2n)+addr(TOKEN)+addr(WBNB);}
+async function receipt(hash){for(let i=0;i<60;i++){const r=await rpc("eth_getTransactionReceipt",[hash]);if(r){if(BigInt(r.status)!==1n)throw Error("Transaction reverted: "+hash);return r;}await new Promise(resolve=>setTimeout(resolve,2000));}throw Error("Receipt not yet available; check tx hash on BscScan Testnet");}
+async function enoughGas(who,gas){const bal=await bnbBalance(who);const gasPrice=BigInt(await rpc("eth_gasPrice"));if(bal<gas*gasPrice*125n/100n)throw Error("Insufficient tBNB to cover estimated gas");return bal;}
+async function quoteAndSimulate(){reset();$("sim").textContent="Checking...";try{
+ const who=await chainAndAccount();const [bal,tbal,allow,q]=await Promise.all([tokenBalance(who),bnbBalance(who),allowance(who),call(ROUTER,quoteInput(SELL_WEI,[TOKEN,WBNB]))]);
+ $("tokenBal").textContent=fmt(bal);$("bnbBal").textContent=fmt(tbal);$("allowance").textContent=fmt(allow);
+ if(bal<SELL_WEI)throw Error("Insufficient CYRUS: need 1,000,000,000 tokens");
+ const gross=decodeQuote(q);
+ const minOut=gross*(10000n-SELL_TAX_BPS)*(10000n-SLIPPAGE_BPS)/100000000n;
+ if(!minOut)throw Error("Calculated minimum output is zero");
+ $("quote").textContent=fmt(gross,18,16);$("min").textContent=fmt(minOut,18,16);
+ if(allow<SELL_WEI){$("approveBtn").disabled=false;$("sim").textContent="Allowance insufficient. Approve exactly 1B CYRUS, then re-quote.";$("sim").className="warn";return;}
+ const deadline=Math.floor(Date.now()/1000)+DEADLINE_SEC;const data=sellInput(minOut,who,deadline);const tx={from:who,to:ROUTER,data,value:"0x0"};
+ await rpc("eth_call",[tx,"latest"]);
+ const estimated=BigInt(await rpc("eth_estimateGas",[tx]));const gas=(estimated*130n+99n)/100n;
+ await enoughGas(who,gas);$("gas").textContent=gas.toString();window.quoteState={who,data,gas,deadline};
+ $("sim").textContent="Simulation OK. Testnet sell enabled.";$("sim").className="good";$("sellBtn").disabled=false;
+}catch(e){$("sim").textContent="BLOCKED: "+(e.message||e);$("sim").className="bad";log("Quote/simulation failed: "+(e.message||e),"bad");}}
+async function approve(){reset();$("approveBtn").disabled=true;try{
+ const who=await chainAndAccount();if(await tokenBalance(who)<SELL_WEI)throw Error("Insufficient CYRUS");
+ const data="0x095ea7b3"+addr(ROUTER)+p32(SELL_WEI);const tx={from:who,to:TOKEN,data,value:"0x0"};
+ const est=BigInt(await rpc("eth_estimateGas",[tx]));const gas=(est*130n+99n)/100n;await enoughGas(who,gas);
+ log("Requesting limited approval of exactly 1B CYRUS...");
+ const hash=await rpc("eth_sendTransaction",[{...tx,gas:hex(gas)}]);log("Approve tx: "+hash);
+ const r=await receipt(hash);log("Approval confirmed in block "+BigInt(r.blockNumber).toString(),"good");await quoteAndSimulate();
+}catch(e){log("Approve failed: "+(e.message||e),"bad");$("sim").textContent="Approve failed. Re-quote to retry.";}}
+function addressTopic(v){return "0x"+addr(v)}
+async function sell(){const pre=window.quoteState;reset();try{
+ if(!pre||pre.deadline<=Math.floor(Date.now()/1000))throw Error("Quote expired. Re-quote.");
+ const who=await chainAndAccount();if(norm(who)!==norm(pre.who))throw Error("Account changed");
+ if(await allowance(who)<SELL_WEI)throw Error("Approval missing");
+ // Refresh a quote and simulate immediately before wallet confirmation.
+ const q=decodeQuote(await call(ROUTER,quoteInput(SELL_WEI,[TOKEN,WBNB])));
+ const minOut=q*(10000n-SELL_TAX_BPS)*(10000n-SLIPPAGE_BPS)/100000000n;
+ const deadline=Math.floor(Date.now()/1000)+DEADLINE_SEC;const data=sellInput(minOut,who,deadline);const tx={from:who,to:ROUTER,data,value:"0x0"};
+ await rpc("eth_call",[tx,"latest"]);const est=BigInt(await rpc("eth_estimateGas",[tx]));const gas=(est*130n+99n)/100n;await enoughGas(who,gas);
+ const [beforeToken,beforeBNB,beforeTaxBNB,beforeContractToken]=await Promise.all([tokenBalance(who),bnbBalance(who),bnbBalance(TAX_WALLET),tokenBalance(TOKEN)]);
+ log("Requesting explicit MetaMask approval of TESTNET sell of 1B CYRUS...");
+ const hash=await rpc("eth_sendTransaction",[{...tx,gas:hex(gas)}]);log("Sell tx: "+hash);
+ const r=await receipt(hash);log("Sell confirmed in block "+BigInt(r.blockNumber).toString(),"good");
+ const [afterToken,afterBNB,afterTaxBNB,afterContractToken]=await Promise.all([tokenBalance(who),bnbBalance(who),bnbBalance(TAX_WALLET),tokenBalance(TOKEN)]);
+ const gasPaid=BigInt(r.gasUsed)*BigInt(r.effectiveGasPrice||await rpc("eth_gasPrice"));
+ log("Buyer CYRUS spent: "+fmt(beforeToken-afterToken));
+ log("Buyer tBNB received (excluding gas): "+fmt(afterBNB-beforeBNB+gasPaid,18,16));
+ log("Tax wallet tBNB balance change: "+fmt(afterTaxBNB-beforeTaxBNB,18,16));
+ log("CYRUS held by token contract before/after: "+fmt(beforeContractToken)+" / "+fmt(afterContractToken));
+ const logs=r.logs||[];for(const l of logs){if(norm(l.address)!==norm(TOKEN)||norm(l.topics?.[0]||"")!==TRANSFER_TOPIC||norm(l.topics?.[1]||"")!==norm(addressTopic(who)))continue;const to="0x"+l.topics[2].slice(-40);log("CYRUS Transfer from buyer → "+to+": "+fmt(BigInt(l.data)));}
+ log("Copy the log and sell TX hash for review. Do not infer automatic tax-swap success from sell confirmation alone.","good");
+}catch(e){log("Sell not completed: "+(e.message||e),"bad");$("sim").textContent="Sell blocked/failed. Review log; re-quote before retry.";}}
+function init(){const p=provider();$("status").textContent=p?"Wallet detected. Click Connect / Quote & Simulate.":"Wallet not detected. Open in MetaMask in-app Browser, not external Chrome.";$("status").className="panel "+(p?"good":"warn");}
+$("fixedBuyer").textContent=BUYER;$("fixedRouter").textContent=ROUTER;$("fixedToken").textContent=TOKEN;
+$("quoteBtn").addEventListener("click",quoteAndSimulate);
+$("approveBtn").addEventListener("click",approve);
+$("sellBtn").addEventListener("click",sell);
+window.addEventListener("ethereum#initialized",init,{once:true});
+init();setTimeout(init,3000);
+if(provider()?.on){provider().on("accountsChanged",()=>{reset();init();log("Account changed. Re-quote required.","warn")});provider().on("chainChanged",()=>{reset();init();log("Chain changed. Re-quote required.","warn")});}
+</script>
+</body>
+</html>
