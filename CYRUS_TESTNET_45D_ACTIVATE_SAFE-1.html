@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex,nofollow" />
+<title>CYRUS V2 | فعال‌سازی محدودیت ۴۵ روزه — فقط Testnet</title>
+<style>
+:root {color-scheme:dark;--bg:#0b1019;--panel:#161d29;--line:#374255;--text:#ebf1f9;--mute:#a9b4c6;--amber:#f7bc60;--green:#71dfb4;--red:#ff8383}
+* {box-sizing:border-box} body {font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--text);margin:0 auto;padding:18px;max-width:720px;line-height:1.8}
+h1{font-size:1.4rem;line-height:1.5;margin:8px 0 16px} h2{font-size:1.1rem} .box{border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:15px;margin:12px 0}.warn{color:var(--amber)}.ok{color:var(--green)}.bad{color:var(--red)}.muted{color:var(--mute)}.mono{direction:ltr;text-align:left;overflow-wrap:anywhere;font-family:ui-monospace,"SFMono-Regular",monospace;font-size:12px}button{border:0;border-radius:9px;background:#f0a035;color:#171717;font:inherit;font-weight:700;padding:12px 14px;margin:7px 0 8px 8px;cursor:pointer}button:disabled{opacity:.4;cursor:not-allowed}.danger{background:#f3d98b}#log{direction:ltr;text-align:left;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.8 ui-monospace,monospace;min-height:70px;background:#070b13;border:1px solid var(--line);border-radius:9px;padding:12px}.line{border-top:1px solid var(--line);margin:8px 0;padding-top:8px}
+</style>
+</head>
+<body>
+<h1>CYRUS V2 — فعال‌سازی محدودیت ۴۵ روزه</h1>
+<div class="box">
+  <strong class="warn">فقط BSC Testnet — Chain ID 97</strong>
+  <p>قرارداد موجود، بدون ساخت توکن یا استخر جدید. محدودیت مورد انتظار MaxTx = 900 میلیارد و MaxWallet = 1.8 تریلیون CYRUS است.</p>
+  <div class="muted">Contract</div><div class="mono" id="contract"></div>
+  <div class="muted line">Authorized OWNER</div><div class="mono" id="owner"></div>
+  <div class="muted line">Function selector</div><div class="mono" id="selector"></div>
+  <p class="warn">این دکمه فقط شروع دوره ۴۵روزه را فعال می‌کند. قابلیت بازگرداندن زمان شروع به صفر یا فعال‌سازی مجدد تضمین نشده است.</p>
+</div>
+<div class="box">
+  <div id="status" class="warn">در انتظار اتصال کیف پول…</div>
+  <div>حساب انتخاب‌شده: <span class="mono" id="account">—</span></div>
+  <div>وضعیت زمان شروع: <strong id="start">بررسی نشده</strong></div>
+  <div>Gas limit پیشنهادی: <strong id="gas">—</strong></div>
+  <div>تاریخ شروع (ایران): <strong id="date">—</strong></div>
+</div>
+<div>
+<button id="check">۱. اتصال OWNER و بررسی ایمن</button>
+<button id="activate" class="danger" disabled>۲. فعال‌سازی ۴۵ روزه روی Testnet</button>
+</div>
+<div class="box">
+  <strong>قبل از تأیید در MetaMask</strong>
+  <p>شبکه باید BSC Testnet باشد، آدرس مقصد باید همین قرارداد CYRUS و مبلغ انتقال باید صفر tBNB باشد. فقط هزینه Gas آزمایشی پرداخت می‌شود. هیچ کلید خصوصی یا عبارت بازیابی‌ای لازم نیست.</p>
+</div>
+<h2>گزارش</h2><div id="log"></div>
+<script>
+"use strict";
+const CHAIN=97n, CONTRACT="0x154e889f0cdf0814e1dfff527c32a8bdd526285f";
+const OWNER="0xC44FD331C871F8CE6fa45e0bc9264E034769D408";
+const SELECTOR="0x01339c21"; // existing on-chain owner-only start selector
+const SLOT="0x8", PERIOD=45*24*60*60;
+const $=id=>document.getElementById(id);
+const hex=n=>"0x"+BigInt(n).toString(16);
+const norm=s=>String(s).toLowerCase();
+const fmtIran=t=>new Intl.DateTimeFormat("fa-IR",{timeZone:"Asia/Tehran",dateStyle:"long",timeStyle:"medium"}).format(new Date(Number(t)*1000));
+let pending=false,verified=false;
+function info(msg,cls=""){const d=document.createElement("div");d.textContent=msg;d.className=cls;$("log").appendChild(d);}
+function provider(){const e=window.ethereum;if(!e)return null;if(Array.isArray(e.providers))return e.providers.find(p=>p&&p.isMetaMask)||e;return e;}
+async function rpc(method,params=[]){const p=provider();if(!p||typeof p.request!=="function")throw Error("MetaMask provider not found. Open this URL inside the MetaMask browser.");return p.request({method,params});}
+function lock(msg){verified=false;$("activate").disabled=true;if(msg)$("status").textContent=msg;}
+function assert(x,msg){if(!x)throw Error(msg);}
+async function preflight(){
+  lock("در حال بررسی شبکه و قرارداد…");
+  let ch=BigInt(await rpc("eth_chainId"));
+  if(ch!==CHAIN){await rpc("wallet_switchEthereumChain",[{chainId:"0x61"}]);ch=BigInt(await rpc("eth_chainId"));}
+  assert(ch===CHAIN,"Wrong network. Chain ID must be 97.");
+  const acc=await rpc("eth_requestAccounts");assert(acc&&acc.length,"No wallet connected");
+  const who=acc[0];$("account").textContent=who;
+  assert(norm(who)===norm(OWNER),"Wrong account. Switch to CYRUS OWNER; never use TEST BUYER or TAX wallet.");
+  const code=String(await rpc("eth_getCode",[CONTRACT,"latest"])).toLowerCase();
+  assert(code.length>2,"Contract does not exist on Testnet.");
+  assert(code.includes(SELECTOR.slice(2)),"Unexpected contract: start selector not present.");
+  const marker1=Array.from("maxTx 900B (45d)",ch=>ch.charCodeAt(0).toString(16).padStart(2,"0")).join("");
+  const marker2=Array.from("maxWallet 1.8T (45d)",ch=>ch.charCodeAt(0).toString(16).padStart(2,"0")).join("");
+  assert(code.includes(marker1)&&code.includes(marker2),"Contract limit markers do not match the expected deployment.");
+  const before=BigInt(await rpc("eth_getStorageAt",[CONTRACT,SLOT,"latest"]));
+  $("start").textContent=before===0n?"هنوز شروع نشده":"قبلاً آغاز شده";
+  if(before!==0n){$("date").textContent=fmtIran(before)+" — پایان: "+fmtIran(before+BigInt(PERIOD));throw Error("Already activated. Do not send another transaction.");}
+  const tx={from:OWNER,to:CONTRACT,data:SELECTOR,value:"0x0"};
+  await rpc("eth_call",[tx,"latest"]);
+  const est=BigInt(await rpc("eth_estimateGas",[tx]));
+  const gas=(est*125n+99n)/100n;
+  const [gasPriceRaw,balanceRaw]=await Promise.all([rpc("eth_gasPrice"),rpc("eth_getBalance",[OWNER,"latest"])]);
+  const gasPrice=BigInt(gasPriceRaw),balance=BigInt(balanceRaw);
+  assert(balance>=gas*gasPrice*125n/100n,"Insufficient testnet BNB for gas.");
+  $("gas").textContent=gas.toString();
+  $("status").textContent="✅ بررسی‌ها و شبیه‌سازی موفق؛ آماده فعال‌سازی فقط Testnet";
+  $("status").className="ok";
+  verified=true;
+  if(!pending)$("activate").disabled=false;
+  return {tx,gas};
+}
+async function check(){if(pending)return;$("check").disabled=true;try{await preflight();info("PREFLIGHT OK: chain=97; OWNER verified; contract markers match; start=0; eth_call passed.","ok");}catch(e){lock("بررسی متوقف شد: "+(e.message||e));$("status").className="bad";info("BLOCKED: "+(e.message||e),"bad");}finally{$("check").disabled=false;}}
+async function activate(){if(pending||!verified)return;pending=true;$("activate").disabled=true;$("check").disabled=true;let submitted=false;
+  try{
+    const {tx,gas}=await preflight();
+    const accts=await rpc("eth_accounts");const ch=BigInt(await rpc("eth_chainId"));
+    assert(ch===CHAIN&&accts&&norm(accts[0])===norm(OWNER),"Account/network changed. Aborted.");
+    info("Requesting MetaMask confirmation: zero tBNB; owner-only start, BSC Testnet.");
+    const hash=await rpc("eth_sendTransaction",[{...tx,gas:hex(gas)}]);
+    submitted=true;info("TRANSACTION SUBMITTED: "+hash,"ok");info("Explorer: https://testnet.bscscan.com/tx/"+hash);
+    let receipt=null;
+    for(let i=0;i<60;i++){
+      receipt=await rpc("eth_getTransactionReceipt",[hash]);
+      if(receipt)break;
+      await new Promise(resolve=>setTimeout(resolve,2000));
+    }
+    if(!receipt)throw Error("Transaction pending: check TX hash; do not resubmit.");
+    assert(BigInt(receipt.status)===1n,"Transaction reverted. TX: "+hash);
+    const start=BigInt(await rpc("eth_getStorageAt",[CONTRACT,SLOT,"latest"]));
+    assert(start>0n,"Transaction confirmed but start timestamp is still zero; inspect TX before further actions.");
+    const end=start+BigInt(PERIOD);
+    $("start").textContent="فعال شد";$("date").textContent=fmtIran(start)+" — پایان: "+fmtIran(end);
+    $("status").textContent="✅ محدودیت‌های ۴۵روزه روی BSC Testnet فعال شدند";$("status").className="ok";
+    info("CONFIRMED block="+BigInt(receipt.blockNumber)+"; START="+start+"; END="+end,"ok");
+  }catch(e){info("STOP: "+(e.message||e),"bad");$("status").textContent=submitted?"وضعیت تراکنش را از روی هش بررسی کن؛ دوباره ارسال نکن.":"تراکنش ارسال نشد یا توسط MetaMask رد شد.";$("status").className="bad";}
+  finally{pending=false;lock();$("check").disabled=false;}
+}
+$("contract").textContent=CONTRACT;$("owner").textContent=OWNER;$("selector").textContent=SELECTOR;
+$("check").addEventListener("click",check);$("activate").addEventListener("click",activate);
+function init(){if(!provider())$("status").textContent="کیف پول شناسایی نشد؛ در مرورگر داخلی MetaMask باز کن.";}
+window.addEventListener("ethereum#initialized",init,{once:true});init();setTimeout(init,3000);
+if(provider()?.on){provider().on("accountsChanged",()=>lock("حساب تغییر کرد؛ بررسی مجدد لازم است."));provider().on("chainChanged",()=>lock("شبکه تغییر کرد؛ بررسی مجدد لازم است."));}
+</script>
+</body>
+</html>
