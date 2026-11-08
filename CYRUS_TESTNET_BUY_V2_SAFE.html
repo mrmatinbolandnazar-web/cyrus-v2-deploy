@@ -144,7 +144,8 @@ async function quoteAndSimulate(){
   catch(e){ throw new Error("gas estimate failed: "+(e&&e.message?e.message:e)); }
   const gas=(BigInt(est)*120n+99n)/100n;
   const bal=BigInt(await rpc("eth_getBalance",[buyer,"latest"]));
-  if (bal < BUY_WEI + gas) {
+  const gasPrice=BigInt(await rpc("eth_gasPrice",[]));
+  if (bal < BUY_WEI + gas*gasPrice*120n/100n) {
     $("sim").textContent="Insufficient balance for buy + gas";
     $("sim").className="err";
     $("buyBtn").disabled=true;
@@ -189,7 +190,7 @@ async function buy(){
 async function init(){
   const p=getProvider();
   if(!p){ $("status").textContent="No MetaMask/EIP-1193 wallet detected."; return; }
-  try { await ensureChain(); const accts=await rpc("eth_accounts",[]); $("status").innerHTML="<span class='ok'>Wallet ready</span>"; $("info").style.display="block"; $("quoteBtn").disabled=false; if(accts&&accts.length) $("acct").textContent=accts[0]; }
+  try { const accts=await rpc("eth_accounts",[]); $("status").innerHTML="<span class='ok'>Wallet ready</span>"; $("info").style.display="block"; $("quoteBtn").disabled=false; if(accts&&accts.length) $("acct").textContent=accts[0]; }
   catch(e){ $("status").innerHTML="<span class='err'>"+(e&&e.message?e.message:e)+"</span>"; }
   const provider=getProvider();
   if(provider && provider.on){
@@ -199,7 +200,10 @@ async function init(){
 }
 $("quoteBtn").addEventListener("click", async ()=>{ try { await quoteAndSimulate(); } catch(e){ log("Quote/sim failed: "+(e&&e.message?e.message:e),"err"); } });
 $("buyBtn").addEventListener("click", async ()=>{ try { await buy(); } catch(e){ log("Buy failed: "+(e&&e.message?e.message:e),"err"); } });
+$("quoteBtn").disabled=false;
+window.addEventListener("ethereum#initialized",init,{once:true});
 init();
+setTimeout(init,3000);
 </script>
 </body>
 </html>
